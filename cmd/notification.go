@@ -33,6 +33,13 @@ import (
 	"github.com/minio/minio/pkg/policy"
 )
 
+type notificationMode int
+
+const (
+	serverMode notificationMode = iota
+	gatewayMode
+)
+
 // NotificationSys - notification system.
 type NotificationSys struct {
 	sync.RWMutex
@@ -40,6 +47,7 @@ type NotificationSys struct {
 	bucketRulesMap             map[string]event.RulesMap
 	bucketRemoteTargetRulesMap map[string]map[event.TargetID]event.RulesMap
 	peerRPCClientMap           map[xnet.Host]*PeerRPCClient
+	mode                       notificationMode
 }
 
 // GetARNList - returns available ARNs.
@@ -430,15 +438,25 @@ func (sys *NotificationSys) send(bucketName string, eventData event.Event, targe
 
 // Send - sends event data to all matching targets.
 func (sys *NotificationSys) Send(args eventArgs) []event.TargetIDErr {
-	sys.RLock()
-	targetIDSet := sys.bucketRulesMap[args.BucketName].Match(args.EventName, args.Object.Name)
-	sys.RUnlock()
+	var targetIDSet event.TargetIDSet
+	if sys.mode == gatewayMode {
+		targetIDSet = event.NewTargetIDSet(sys.targetList.List()...)
+	} else {
+		sys.RLock()
+		targetIDSet = sys.bucketRulesMap[args.BucketName].Match(args.EventName, args.Object.Name)
+		sys.RUnlock()
+	}
 	if len(targetIDSet) == 0 {
 		return nil
 	}
 
 	targetIDs := targetIDSet.ToSlice()
 	return sys.send(args.BucketName, args.ToEvent(), targetIDs...)
+}
+
+// SetGatewayMode - sets the notification system to gateway mode
+func (sys *NotificationSys) SetGatewayMode() {
+	sys.mode = gatewayMode
 }
 
 // NewNotificationSys - creates new notification system object.
@@ -452,6 +470,7 @@ func NewNotificationSys(config *serverConfig, endpoints EndpointList) *Notificat
 		bucketRulesMap:             make(map[string]event.RulesMap),
 		bucketRemoteTargetRulesMap: make(map[string]map[event.TargetID]event.RulesMap),
 		peerRPCClientMap:           peerRPCClientMap,
+		mode:                       serverMode,
 	}
 }
 

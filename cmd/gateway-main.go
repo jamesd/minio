@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -46,6 +47,19 @@ var (
 		HideHelpCommand: true,
 	}
 )
+
+func handleNotifyEnvVar(cfg *serverConfig) {
+	if cfg == nil {
+		return
+	}
+	notifiers := os.Getenv("MINIO_GATEWAY_NOTIFY")
+	if notifiers == "" {
+		return
+	}
+	if err := json.Unmarshal([]byte(notifiers), cfg); err != nil {
+		logger.LogIf(context.Background(), err)
+	}
+}
 
 // RegisterGatewayCommand registers a new command for gateway.
 func RegisterGatewayCommand(cmd cli.Command) error {
@@ -163,6 +177,9 @@ func StartGateway(ctx *cli.Context, gw Gateway) {
 	// Override any values from ENVs.
 	srvCfg.loadFromEnvs()
 
+	// Add notification targets from ENV
+	handleNotifyEnvVar(srvCfg)
+
 	// Load values to cached global values.
 	srvCfg.loadToCachedConfigs()
 
@@ -191,6 +208,7 @@ func StartGateway(ctx *cli.Context, gw Gateway) {
 
 	// Create new notification system.
 	globalNotificationSys = NewNotificationSys(globalServerConfig, EndpointList{})
+	globalNotificationSys.SetGatewayMode()
 
 	// Create new policy system.
 	globalPolicySys = NewPolicySys()
